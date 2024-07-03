@@ -1,0 +1,309 @@
+<template>
+  <div class="flex flex-col h-screen">
+    <!--    导航栏-->
+    <div
+        class="flex flex-nowrap fixed w-full items-baseline top-0 px-6 py-4 bg-gray-100"
+    >
+      <div class="text-2xl font-bold">云研</div>
+      <div class="ml-4 text-sm text-gray-500">
+        自然语言模型人工智能对话
+      </div>
+      <div
+          class="ml-auto px-3 py-2 text-sm cursor-pointer hover:bg-white rounded-md"
+          @click="clickConfig()"
+      >
+        设置
+      </div>
+    </div>
+
+    <!--    消息列表区域-->
+    <div class="flex-1 mx-2 mt-20 mb-2" ref="chatListDom">
+      <div
+          class="group flex flex-col px-4 py-3 hover:bg-slate-100 rounded-lg"
+          v-for="item of messageList.filter((v) => v.role !== 'system')"
+      >
+        <div class="flex justify-between items-center mb-2">
+          <div class="font-bold">{{ roleAlias[item.role] }}：</div>
+          <Copy class="invisible group-hover:visible" :content="item.content" v-if="!item.document"/>
+          <Download class="invisible group-hover:visible" v-else-if="item.document" :url="downloadUrl"/>
+        </div>
+        <div>
+          <div
+              style="overflow-x:auto"
+              class="text-sm text-slate-600 leading-relaxed"
+              :class="{'max-w-prose': !item.document}"
+              v-if="item.content"
+              v-html="md.render(item.content)"
+          ></div>
+          <Loding v-else/>
+        </div>
+      </div>
+
+    </div>
+
+    <!--    输入区域-->
+    <div class="sticky bottom-0 w-full p-6 pb-8 bg-gray-100">
+      <div class="-mt-2 mb-2 text-sm text-gray-500" v-if="isConfig">
+        请输入 API Key：
+      </div>
+      <div class="flex">
+        <!--        isConfig状态不同展示不同的内容 true代表还没有配置密钥，false代表配置密钥成功-->
+        <input
+            class="input"
+            :type="isConfig ? 'password' : 'text'"
+            :placeholder="isConfig ? 'sk-xxxxxxxxxx' : '请输入'"
+            v-model="messageContent"
+            @keydown.enter="isTalking || sendOrSave()"
+        />
+        <button class="btn" :disabled="isTalking" @click="sendOrSave()">
+          {{ isConfig ? "保存" : "发送" }}
+        </button>
+      </div>
+    </div>
+  </div>
+</template>
+
+<script setup lang="ts">
+import type {ChatMessage} from "@/types";
+import {nextTick, onMounted, ref, watch} from "vue";
+import {chat} from "@/libs/gpt";
+import cryptoJS from "crypto-js";
+//两组件的内容
+import Loding from "@/components/Loding.vue";
+import Copy from "@/components/Copy.vue";
+import Download from "@/components/Download.vue";
+//以markdown的形式输出文档
+import {md} from "@/libs/markdown";
+
+
+// ref定义的响应式变量
+let apiKey = "";
+let isConfig = ref(true);
+let isTalking = ref(false);
+let messageContent = ref("");
+let messageCSV = ref(false);
+// let messageExcel = ref(false);
+let downloadUrl = "table/test3";
+//控制csv转化为markdown
+let count = 0;
+const chatListDom = ref<HTMLDivElement>();
+const decoder = new TextDecoder("utf-8");
+const roleAlias = {human: "ME", assistant: "小云", system: "System"};
+const messageList = ref<ChatMessage[]>([
+  {
+    role: "system",
+    content: "我是小云，尽可能简洁地回答。",
+    document: false,
+  },
+  {
+    role: "assistant",
+    content: `你好，我是小云，我可以提供一些常用服务和信息，例如：
+
+1. 翻译：我可以把中文翻译成英文，英文翻译成中文，还有其他一些语言翻译，比如法语、日语、西班牙语等。
+
+2. 咨询服务：如果你有任何问题需要咨询，例如健康、法律、投资等方面，我可以尽可能为你提供帮助。
+
+3. 闲聊：如果你感到寂寞或无聊，我们可以聊一些有趣的话题，以减轻你的压力。
+
+请告诉我你需要哪方面的帮助，我会根据你的需求给你提供相应的信息和建议。`,
+    document: false,
+  },
+]);
+
+
+onMounted(() => {
+  if (getAPIKey()) {
+    switchConfigStatus();
+  }
+});
+
+//发送promote
+const sendChatMessage = async (content: string = messageContent.value) => {
+  try {
+    isTalking.value = true;
+    if (messageList.value.length === 2) {
+      messageList.value.pop();
+    }
+    messageList.value.push({role: "human", content, document: false});
+    clearMessageContent();
+    messageList.value.push({role: "assistant", content: "", document: false});
+
+    const {body, status, headers} = await chat(messageList.value, getAPIKey());
+
+    console.log(headers.get('Content-Type'))
+
+    if (headers.get('Content-Type') === 'text/csv; charset=utf-8') {
+      messageList.value[messageList.value.length - 1].document = true;
+      messageCSV.value = true;
+      console.log(messageCSV.value)
+    }
+    if (body) {
+      const reader = body.getReader();
+      await readStream(reader, status);
+    }
+
+  } catch (error: any) {
+    appendLastMessageContent(error);
+  } finally {
+    isTalking.value = false;
+  }
+};
+
+function StringManipulation(data: string) {
+  let newData = data.trim().split(/\\n/);
+  console.log("new", newData)
+  const regex: RegExp = /"[^"]*"|[^\s,'"]+(?:\s+[^\s,'"]+)*|(?<=,)\s*(?=,)/g;
+  let veliable: string [] = [];
+  newData.forEach(s => {
+    if (count > 12) {
+      return;
+    }
+    console.log("s", s);
+    veliable[count] = "|";
+    if (count === 0) {
+      veliable[count + 1] = "|";
+      count = 1;
+    }
+    const array = s.match(regex);
+    array.forEach((item) => {
+      if (count === 1) {
+        veliable[count - 1] = veliable[count - 1] + item + '|';
+        veliable[count] = veliable[count] + ':---:|';
+      } else {
+        veliable[count] = veliable[count] + item + '|';
+      }
+    })
+    count++;
+  })
+  return veliable.map((data: String, index) => {
+    return data + '\n';
+  });
+}
+
+function StreamOutput(data: string) {
+  let newData = data.trim().split(/\n\n/);
+  return newData.map((data: String,) => {
+    if (data.indexOf("finish_reason") != -1) {
+      console.log("结束");
+      const jsonString = JSON.stringify(data.replace(" finish_reason", ""));
+      return JSON.parse(jsonString);
+    }
+
+    const jsonString = data.substring(0);
+    return JSON.parse(jsonString);
+  });
+}
+
+
+//处理流式数据
+const readStream = async (
+    reader: ReadableStreamDefaultReader<Uint8Array>,
+    status: number
+) => {
+
+  while (true) {
+    // console.log(++count);
+    // eslint-disable-next-line no-await-in-loop
+    const {value, done} = await reader.read();
+    if (done) break;
+    const decodedText = decoder.decode(value, {stream: true});
+    // console.log("one", decodedText)
+    if (status !== 200) {
+      const json = JSON.parse(decodedText); // start with "data: "
+      const content = json.error.message ?? decodedText;
+      appendLastMessageContent(content);
+      return;
+    }
+
+    // const newLines = decodedText.trim().split(/\n/);
+    let jsonObject: string[] = [];
+    if (messageCSV.value) jsonObject = StringManipulation(decodedText);
+    else jsonObject = StreamOutput(decodedText);
+
+
+    await jsonObject.forEach((item: any) => {
+      appendLastMessageContent(item);
+    })
+  }
+};
+
+//将流式传送的数据增添到消息队列
+const appendLastMessageContent = (content: string) => {
+  messageList.value[messageList.value.length - 1].content += content;
+}
+
+
+const sendOrSave = () => {
+  if (!messageContent.value.length) return;
+  if (isConfig.value) {
+    if (saveAPIKey(messageContent.value.trim())) {
+      switchConfigStatus();
+    }
+    clearMessageContent();
+  } else {
+    sendChatMessage();
+  }
+};
+
+const clickConfig = () => {
+  if (!isConfig.value) {
+    messageContent.value = getAPIKey();
+  } else {
+    clearMessageContent();
+  }
+  switchConfigStatus();
+};
+
+const getSecretKey = () => "lianginx";
+const saveAPIKey = (apiKey: string) => {
+  // if (apiKey.slice(0, 3) !== "sk-" || apiKey.length !== 51) {
+  //   alert("API Key 错误，请检查后重新输入！");
+  //   return false;
+  // }
+  // const aesAPIKey = cryptoJS.AES.encrypt(apiKey, getSecretKey()).toString();
+  // localStorage.setItem("apiKey", aesAPIKey);
+
+  return true;
+};
+
+const getAPIKey = () => {
+  if (apiKey) return apiKey;
+  const aesAPIKey = localStorage.getItem("apiKey") ?? "";
+  apiKey = cryptoJS.AES.decrypt(aesAPIKey, getSecretKey()).toString(
+      cryptoJS.enc.Utf8
+  );
+  return apiKey;
+};
+
+const switchConfigStatus = () => (isConfig.value = !isConfig.value);
+
+const clearMessageContent = () => {
+  count = 0;
+  messageContent.value = ""
+};
+
+const scrollToBottom = () => {
+  if (!chatListDom.value) return;
+  scrollTo(0, chatListDom.value.scrollHeight);
+};
+
+watch(messageList.value, () => {
+  // count++;
+  // console.log("监听成功", messageList.value, count);
+  nextTick(() => scrollToBottom())
+}, {
+  deep: true
+});
+
+
+</script>
+
+<style scoped>
+pre {
+  font-family: -apple-system, "Noto Sans", "Helvetica Neue", Helvetica,
+  "Nimbus Sans L", Arial, "Liberation Sans", "PingFang SC", "Hiragino Sans GB",
+  "Noto Sans CJK SC", "Source Han Sans SC", "Source Han Sans CN",
+  "Microsoft YaHei", "Wenquanyi Micro Hei", "WenQuanYi Zen Hei", "ST Heiti",
+  SimHei, "WenQuanYi Zen Hei Sharp", sans-serif;
+}
+</style>
