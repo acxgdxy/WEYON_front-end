@@ -78,7 +78,7 @@ import {md} from "@/libs/markdown";
 import {Client} from "@gradio/client";
 import cryptoJS from "crypto-js";
 import {chat} from "@/libs/gpt";
-
+//数字人的接口文件
 
 // ref定义的响应式变量
 let apiKey = "";
@@ -103,6 +103,8 @@ const store = Api();
 //   });
 //
 // }
+//ws连接
+
 
 onMounted(() => {
   if (getAPIKey()) {

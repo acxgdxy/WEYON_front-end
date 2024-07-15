@@ -16,8 +16,10 @@ export const useCounterStore = defineStore('counter', () => {
 export const Api = defineStore('api', {
     state: () => {
         return {
-            url: "/chain",
-            name: 'chain',
+            // url: "/chain",
+            // name: 'chain',
+            url: "/chat",
+            name: 'chat',
             messageList: <ChatMessage[]>([
                 {
                     role: "system",
@@ -47,6 +49,14 @@ export const Api = defineStore('api', {
             return await client.predict("/chat", {
                 message: this.messageList[this.messageList.length - 2].content,
             });
+        }
+    }
+})
+
+export const FileDocument = defineStore('file', {
+    state: () => {
+        return {
+            files: [],
         }
     }
 })

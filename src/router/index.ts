@@ -5,9 +5,21 @@ const router = createRouter({
   routes: [
     {
       path: "/",
-      name: "home",
-      component: () => import("@/views/home.vue"),
-    },
+      name: "digital human",
+      component: () => import("@/views/chat.vue")
+    }, {
+      path: "/chat",
+      name: "chat",
+      component: () => import("@/views/home.vue")
+    }, {
+      path: "/text",
+      name: "txt",
+      component: () => import("@/views/text.vue")
+    }, {
+      path: "/game",
+      name: "game",
+      component: () => import("@/views/game.vue")
+    }
   ],
 });
 
