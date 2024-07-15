@@ -1,4 +1,5 @@
 import type {ChatMessage} from "@/types";
+import {Client} from "@gradio/client";
 
 export async function chat(messageList: ChatMessage[], apiKey: string) {
     try {
@@ -55,3 +56,10 @@ export async function getDownload(newUrl: string, apiKey: string) {
     }
 }
 
+
+export async function GradioChat(newUrl: string, url: string, messageList: ChatMessage[]) {
+    const client = await Client.connect(newUrl);
+    return await client.predict(url, {
+        message: messageList[messageList.length - 2].content
+    });
+}

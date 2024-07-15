@@ -13,14 +13,6 @@ export default defineConfig({
     },
   },
   server: {
-    proxy: {
-      '/api': {
-        target: "http://127.0.0.1:3000",
-        // target: 'http://111.229.133.150',
-        // target: 'http://192.168.100.111:10086',
-        changeOrigin: true,
-        rewrite: (path) => path.replace(/^\/api/, "")
-      }
-    }
+    host: "0.0.0.0",
   }
 });

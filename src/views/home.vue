@@ -9,18 +9,18 @@
         自然语言模型人工智能对话
       </div>
       <div
-          class="ml-auto px-3 py-2 text-sm cursor-pointer hover:bg-white rounded-md"
-          @click="clickConfig()"
-      >
-        设置
+          class="ml-auto px-3 py-2 text-sm cursor-pointer hover:bg-white rounded-md">
+        <!--          @click="clickConfig()"-->
+
+        <DropDownBox/>
       </div>
     </div>
 
-    <!--    消息列表区域-->
+    <!--    消息列表区域-->S
     <div class="flex-1 mx-2 mt-20 mb-2" ref="chatListDom">
       <div
           class="group flex flex-col px-4 py-3 hover:bg-slate-100 rounded-lg"
-          v-for="item of messageList.filter((v) => v.role !== 'system')"
+          v-for="item of store.messageList.filter((v) => v.role !== 'system')"
       >
         <div class="flex justify-between items-center mb-2">
           <div class="font-bold">{{ roleAlias[item.role] }}：</div>
@@ -64,16 +64,20 @@
 </template>
 
 <script setup lang="ts">
+import {storeToRefs} from "pinia";
+import {Api} from "@/store";
 import type {ChatMessage} from "@/types";
 import {nextTick, onMounted, ref, watch} from "vue";
-import {chat} from "@/libs/gpt";
-import cryptoJS from "crypto-js";
 //两组件的内容
 import Loding from "@/components/Loding.vue";
 import Copy from "@/components/Copy.vue";
 import Download from "@/components/Download.vue";
+import DropDownBox from "@/components/DropDownBox.vue";
 //以markdown的形式输出文档
 import {md} from "@/libs/markdown";
+import {Client} from "@gradio/client";
+import cryptoJS from "crypto-js";
+import {chat} from "@/libs/gpt";
 
 
 // ref定义的响应式变量
@@ -89,58 +93,36 @@ let count = 0;
 const chatListDom = ref<HTMLDivElement>();
 const decoder = new TextDecoder("utf-8");
 const roleAlias = {human: "ME", assistant: "小云", system: "System"};
-const messageList = ref<ChatMessage[]>([
-  {
-    role: "system",
-    content: "我是小云，尽可能简洁地回答。",
-    document: false,
-  },
-  {
-    role: "assistant",
-    content: `你好，我是小云，我可以提供一些常用服务和信息，例如：
 
-1. 翻译：我可以把中文翻译成英文，英文翻译成中文，还有其他一些语言翻译，比如法语、日语、西班牙语等。
+const store = Api();
 
-2. 咨询服务：如果你有任何问题需要咨询，例如健康、法律、投资等方面，我可以尽可能为你提供帮助。
-
-3. 闲聊：如果你感到寂寞或无聊，我们可以聊一些有趣的话题，以减轻你的压力。
-
-请告诉我你需要哪方面的帮助，我会根据你的需求给你提供相应的信息和建议。`,
-    document: false,
-  },
-]);
-
+// async function () {
+//   const client = await Client.connect("http://192.168.100.74:7860/chain/");
+//   return await client.predict("/chat", {
+//     message: "请介绍下湖南大众传媒职业技术学院",
+//   });
+//
+// }
 
 onMounted(() => {
   if (getAPIKey()) {
     switchConfigStatus();
   }
 });
-
-//发送promote
 const sendChatMessage = async (content: string = messageContent.value) => {
   try {
     isTalking.value = true;
-    if (messageList.value.length === 2) {
-      messageList.value.pop();
+    console.log(store.messageList)
+    if (store.messageList.length === 2) {
+      store.messageList.pop();
     }
-    messageList.value.push({role: "human", content, document: false});
+    store.messageList.push({role: "human", content, document: false});
     clearMessageContent();
-    messageList.value.push({role: "assistant", content: "", document: false});
-
-    const {body, status, headers} = await chat(messageList.value, getAPIKey());
-
-    console.log(headers.get('Content-Type'))
-
-    if (headers.get('Content-Type') === 'text/csv; charset=utf-8') {
-      messageList.value[messageList.value.length - 1].document = true;
-      messageCSV.value = true;
-      console.log(messageCSV.value)
-    }
-    if (body) {
-      const reader = body.getReader();
-      await readStream(reader, status);
-    }
+    store.messageList.push({role: "assistant", content: "", document: false});
+    const result = store.sendMessage()
+    result.then((res) => {
+      appendLastMessageContent(res.data[0])
+    })
 
   } catch (error: any) {
     appendLastMessageContent(error);
@@ -149,92 +131,15 @@ const sendChatMessage = async (content: string = messageContent.value) => {
   }
 };
 
-function StringManipulation(data: string) {
-  let newData = data.trim().split(/\\n/);
-  console.log("new", newData)
-  const regex: RegExp = /"[^"]*"|[^\s,'"]+(?:\s+[^\s,'"]+)*|(?<=,)\s*(?=,)/g;
-  let veliable: string [] = [];
-  newData.forEach(s => {
-    if (count > 12) {
-      return;
-    }
-    console.log("s", s);
-    veliable[count] = "|";
-    if (count === 0) {
-      veliable[count + 1] = "|";
-      count = 1;
-    }
-    const array = s.match(regex);
-    array.forEach((item) => {
-      if (count === 1) {
-        veliable[count - 1] = veliable[count - 1] + item + '|';
-        veliable[count] = veliable[count] + ':---:|';
-      } else {
-        veliable[count] = veliable[count] + item + '|';
-      }
-    })
-    count++;
-  })
-  return veliable.map((data: String, index) => {
-    return data + '\n';
-  });
-}
-
-function StreamOutput(data: string) {
-  let newData = data.trim().split(/\n\n/);
-  return newData.map((data: String,) => {
-    if (data.indexOf("finish_reason") != -1) {
-      console.log("结束");
-      const jsonString = JSON.stringify(data.replace(" finish_reason", ""));
-      return JSON.parse(jsonString);
-    }
-
-    const jsonString = data.substring(0);
-    return JSON.parse(jsonString);
-  });
-}
-
-
-//处理流式数据
-const readStream = async (
-    reader: ReadableStreamDefaultReader<Uint8Array>,
-    status: number
-) => {
-
-  while (true) {
-    // console.log(++count);
-    // eslint-disable-next-line no-await-in-loop
-    const {value, done} = await reader.read();
-    if (done) break;
-    const decodedText = decoder.decode(value, {stream: true});
-    // console.log("one", decodedText)
-    if (status !== 200) {
-      const json = JSON.parse(decodedText); // start with "data: "
-      const content = json.error.message ?? decodedText;
-      appendLastMessageContent(content);
-      return;
-    }
-
-    // const newLines = decodedText.trim().split(/\n/);
-    let jsonObject: string[] = [];
-    if (messageCSV.value) jsonObject = StringManipulation(decodedText);
-    else jsonObject = StreamOutput(decodedText);
-
-
-    await jsonObject.forEach((item: any) => {
-      appendLastMessageContent(item);
-    })
-  }
-};
-
-//将流式传送的数据增添到消息队列
 const appendLastMessageContent = (content: string) => {
-  messageList.value[messageList.value.length - 1].content += content;
+  store.messageList[store.messageList.length - 1].content += content;
 }
-
 
 const sendOrSave = () => {
-  if (!messageContent.value.length) return;
+  if (!messageContent.value.length){
+    alert("请输入需要查询的问题");
+    return;
+  }
   if (isConfig.value) {
     if (saveAPIKey(messageContent.value.trim())) {
       switchConfigStatus();
@@ -287,15 +192,11 @@ const scrollToBottom = () => {
   scrollTo(0, chatListDom.value.scrollHeight);
 };
 
-watch(messageList.value, () => {
-  // count++;
-  // console.log("监听成功", messageList.value, count);
+watch(store.messageList, () => {
   nextTick(() => scrollToBottom())
 }, {
   deep: true
 });
-
-
 </script>
 
 <style scoped>
